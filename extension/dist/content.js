@@ -1,30 +1,6 @@
 let shortCutToggleSingleKeys = ["alt", "shift", "s"];
 let shortCutToggleAllKeys = ["alt", "shift", "a"];
 let pressedKeys = [];
-chrome.storage.sync.get("settings", (result) => {
-    const settings = result.settings;
-    if (!settings)
-        return;
-    if (!settings.shortCutToggleSingleKeys || !settings.shortCutToggleAllKeys) {
-        if (!settings.shortCutToggleSingleKeys)
-            settings.shortCutToggleSingleKeys = shortCutToggleSingleKeys;
-        if (!settings.shortCutToggleAllKeys)
-            settings.shortCutToggleAllKeys = shortCutToggleAllKeys;
-        chrome.storage.sync.set({ settings });
-    }
-    shortCutToggleSingleKeys = settings.shortCutToggleSingleKeys;
-    shortCutToggleAllKeys = settings.shortCutToggleAllKeys;
-});
-chrome.storage.onChanged.addListener((changes) => {
-    if (changes.settings) {
-        const settings = changes.settings.newValue;
-        if (!settings)
-            return;
-        shortCutToggleSingleKeys = settings.shortCutToggleSingleKeys;
-        shortCutToggleAllKeys = settings.shortCutToggleAllKeys;
-    }
-});
-shortCutListener();
 function shortCutListener() {
     let pressedKeys = [];
     function debounce(cb, delay) {
@@ -73,28 +49,9 @@ function shortCutListener() {
         pressedKeys = [];
     });
 }
-let tabId = null;
-let isTabToggledOn = false;
-let isSameTabRedirectsPrevented = false;
-let combinedURLs = [];
-chrome.runtime.sendMessage({ action: "getTabId" }, (response) => {
-    tabId = response.tabId;
-    beginPreventionOfSameTabRedirects();
-});
-chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
-    if (request.action === "toggleTab") {
-        isTabToggledOn = !!request.isToggledOn;
-        if (isTabToggledOn) {
-            beginPreventionOfSameTabRedirects();
-        }
-        else {
-            endPreventionOfSameTabRedirects();
-        }
-    }
-});
 function preventSameTabRedirect(event) {
     const aTag = event.target;
-    if (!isTabToggledOn || !isSameTabRedirectsPrevented)
+    if (!isTabToggledOn || !isSameTabRedirectsPrevented || !isTabEnabled)
         return;
     if (aTag && aTag.href) {
         if (!isURLMatchSameTab(combinedURLs, aTag.href)) {
@@ -103,7 +60,7 @@ function preventSameTabRedirect(event) {
     }
 }
 function beginPreventionOfSameTabRedirects() {
-    if (!isTabToggledOn || !isSameTabRedirectsPrevented)
+    if (!isTabToggledOn || !isSameTabRedirectsPrevented || !isTabEnabled)
         return;
     const observer = new MutationObserver((mutationsList) => {
         for (const mutation of mutationsList) {
@@ -130,21 +87,77 @@ function endPreventionOfSameTabRedirects() {
 function isURLMatchSameTab(urls, url) {
     if (!url)
         return false;
-    const normalizeUrl = (url) => url
-        .replace(/^https?:\/\/(www\.)?(ww\d+\.)?/, "https://")
-        .replace(/\/([^?]+).*$/, "/$1")
-        .replace(/\/$/, "")
-        .toLowerCase();
-    const normalizedUrl = normalizeUrl(url);
-    for (const currentUrl of urls) {
-        const normalizedCurrentUrl = normalizeUrl(currentUrl);
-        if (normalizedUrl === normalizedCurrentUrl ||
-            normalizedUrl.startsWith(normalizedCurrentUrl + "/")) {
-            return true;
+    try {
+        const targetHostname = new URL(url).hostname;
+        for (const currentUrl of urls) {
+            const allowedHostname = new URL(currentUrl).hostname;
+            if (targetHostname === allowedHostname) {
+                return true;
+            }
+        }
+        return false;
+    }
+    catch (error) {
+        console.error("Invalid URL:", url, error);
+        return false;
+    }
+}
+function getTabEnabledState() {
+    chrome.runtime.sendMessage({ action: "getTabEnabledState" }, (response) => {
+        isTabEnabled = response.tabEnabledState;
+        if (!isTabEnabled) {
+            endPreventionOfSameTabRedirects();
+        }
+        else {
+            beginPreventionOfSameTabRedirects();
+        }
+    });
+}
+chrome.storage.sync.get("settings", (result) => {
+    const settings = result.settings;
+    if (!settings)
+        return;
+    if (!settings.shortCutToggleSingleKeys || !settings.shortCutToggleAllKeys) {
+        if (!settings.shortCutToggleSingleKeys)
+            settings.shortCutToggleSingleKeys = shortCutToggleSingleKeys;
+        if (!settings.shortCutToggleAllKeys)
+            settings.shortCutToggleAllKeys = shortCutToggleAllKeys;
+        chrome.storage.sync.set({ settings });
+    }
+    shortCutToggleSingleKeys = settings.shortCutToggleSingleKeys;
+    shortCutToggleAllKeys = settings.shortCutToggleAllKeys;
+});
+chrome.storage.onChanged.addListener((changes) => {
+    if (changes.settings) {
+        const settings = changes.settings.newValue;
+        if (!settings)
+            return;
+        shortCutToggleSingleKeys = settings.shortCutToggleSingleKeys;
+        shortCutToggleAllKeys = settings.shortCutToggleAllKeys;
+    }
+});
+shortCutListener();
+let tabId = null;
+let isTabToggledOn = false;
+let isSameTabRedirectsPrevented = false;
+let combinedURLs = [];
+let isTabEnabled = true;
+chrome.runtime.sendMessage({ action: "getTabId" }, (response) => {
+    tabId = response.tabId;
+    beginPreventionOfSameTabRedirects();
+    getTabEnabledState();
+});
+chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+    if (request.action === "toggleTab") {
+        isTabToggledOn = !!request.isToggledOn;
+        if (isTabToggledOn) {
+            beginPreventionOfSameTabRedirects();
+        }
+        else {
+            endPreventionOfSameTabRedirects();
         }
     }
-    return false;
-}
+});
 chrome.storage.local.get("extensionTabs", (result) => {
     const extensionTabs = result.extensionTabs;
     if (extensionTabs) {
