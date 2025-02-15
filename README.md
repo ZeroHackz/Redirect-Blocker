@@ -4,6 +4,8 @@
 
 ### Robust URL matching: Implement hostname matching in isURLMatch and isURLMatchPOPUP in background.ts, content.ts, and script.ts.
 
+### Refactor onCreated and onUpdated: Simplify with early returns, helper functions, and replace setInterval with chrome.webNavigation.onCommitted.
+
 ###### Updated by ZeroHackz
 ---------------
 # Redirect Blocker

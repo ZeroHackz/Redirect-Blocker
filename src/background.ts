@@ -37,7 +37,61 @@ const initialSettings = {
 
 let settings = initialSettings;
 
-// Event Listeners
+/**
+ * ASYNC FUNCTIONS
+ */
+
+async function checkRedirect(tab: chrome.tabs.Tab, extTab: Tab | null) {// onCreated Listening events
+  const combinedURLs = extTab
+      ? [...allowedURLs, ...settings.savedURLs, new URL(extTab.url).origin]
+      : allowedURLs;
+
+  if (extTab && !isURLMatch(combinedURLs, tab.url)) {
+      await chrome.tabs.remove(tab.id).catch(() => null);
+  } else if (allTabsModeIsOn) {
+      await updateExtensionTab(tab, true);
+  }
+};
+
+async function handleTabUpdate(tab: chrome.tabs.Tab) {// onUpdated Listening events
+  const tabId = tab.id;
+  const url = tab.url;
+  let extTab = extensionTabs.find((t) => t.id === tabId);
+
+  // Check if saved URL. If so, add to extTabs
+  if (isURLMatch(settings.savedURLs, url)) {
+      if (!extTab) {
+          await updateExtensionTab(tab, true);
+          return;
+      }
+  }
+
+  // Check if URL is allowed (+ saved). If so, return + checks.
+  if (isURLMatch([...settings.savedURLs, ...allowedURLs], url)) {
+      if (extTab) {
+          try {
+              if (extTab.url && new URL(extTab.url).origin !== new URL(url).origin) {
+                  if (!settings.tabExclusive && !allTabsModeIsOn) {
+                      removeExtensionTab(extTab, true);
+                      return;
+                  }
+              }
+              await updateExtensionTab(tab);
+              return;
+          } catch (error) {
+              console.error("Error comparing origins", error);
+              return; // Prevent further processing if URL parsing fails
+          }
+      }
+  }
+  if (extTab) await updateExtensionTab(tab);
+
+}
+
+
+/**
+ * EVENT LISTENERS
+ */
 chrome.runtime.onStartup.addListener(() => {
   chrome.storage.sync.get("settings", (res) => {
     const startUpSetting = (res?.settings as typeof initialSettings).onStartup;
@@ -53,99 +107,44 @@ chrome.runtime.onStartup.addListener(() => {
   });
 });
 
-chrome.tabs.onCreated.addListener(async (tab) => {
+chrome.webNavigation.onCommitted.addListener(async (details) => {//on created rework
+  if (details.frameId !== 0) return; // Ignore subframes
+  const tabId = details.tabId;
+  const tab = await chrome.tabs.get(tabId).catch(() => null);
+  if (!tab) return;
+
   const extTab = extensionTabs.find(
-    (t) => t.active && t.windowId === tab.windowId
+      (t) => t.active && t.windowId === tab.windowId
   );
   if (!extTab && !allTabsModeIsOn) return;
 
-  // Incase of bookmark/links 'open in new tab'
-  let createdTabActive = tab.active;
 
-  if (!extTab || extTab.windowId === tab.windowId) {
-    if (extTab)
-      await chrome.tabs.update(extTab.id, { active: true }).catch(() => null);
+  if (extTab && extTab.windowId !== tab.windowId) return;
 
-    // pendingUrl and url properties are not immediately available (TAKES LIKE on average 20ms)
-    let intMs = 0;
-    let urlPropertiesInterval = setInterval(async () => {
-      const updatedTab = await chrome.tabs.get(tab.id).catch(() => null);
-      if (!updatedTab) return clearInterval(urlPropertiesInterval);
-      intMs += 20;
-      if (updatedTab.url || updatedTab.pendingUrl) {
-        checkRedirect(updatedTab, extTab).catch(() => null);
-        clearInterval(urlPropertiesInterval);
-      } else if (intMs >= 1000) {
-        return clearInterval(urlPropertiesInterval);
-      }
-    }, 20);
-  }
-
-  async function checkRedirect(tab: chrome.tabs.Tab, extTab: Tab | null) {
-    if (extTab) {
-      const combinedURLs = [
-        ...allowedURLs,
-        ...settings.savedURLs,
-        new URL(extTab.url).origin,
-      ];
-
-      if (isURLMatch(combinedURLs, tab.pendingUrl || tab.url)) {
-        if (createdTabActive) {
-          await chrome.tabs.update(tab.id, { active: true }).catch(() => null);
-        }
-        if (allTabsModeIsOn) {
-          await updateExtensionTab(tab, true);
-        }
-        return;
-      } else await chrome.tabs.remove(tab.id).catch(() => null);
-    } else if (allTabsModeIsOn) {
-      await updateExtensionTab(tab, true);
-    }
-  }
+  await checkRedirect(tab, extTab);
 });
 
-chrome.tabs.onUpdated.addListener(async (tabId, _changeInfo, tab) => {
+chrome.webNavigation.onCommitted.addListener(async (details) => {
+  if (details.frameId !== 0) return; // Ignore subframes
+  const tabId = details.tabId;
+  const tab = await chrome.tabs.get(tabId).catch(() => null);
+  if (!tab) return; // Tab might have been closed in the meantime
+
   const disabledTab = disabledTabs.find((t) => t.id === tabId);
   if (disabledTab) {
-    if (new URL(disabledTab.url).hostname === new URL(tab.url).hostname) return;
-    else removeDisabledTab(disabledTab);
+      try {
+          if (new URL(disabledTab.url).hostname === new URL(tab.url).hostname) return;
+          else removeDisabledTab(disabledTab);
+      } catch (error) {
+          console.error("Error comparing hostnames for disabled tab", error);
+          removeDisabledTab(disabledTab); // Remove on error to avoid getting stuck
+          return;
+      }
   }
 
-  // Check if saved URL. If so, add to extTabs
-  let extTab = extensionTabs.find((t) => t.id === tabId);
-  if (isURLMatch(settings.savedURLs, tab.url)) {
-    if (!extTab) return (extTab = (await updateExtensionTab(tab, true)) as Tab);
-  }
-
-  // Check if URL is allowed (+ saved). If so, return + checks.
-  if (isURLMatch([...settings.savedURLs, ...allowedURLs], tab.url)) {
-    if (extTab) {
-      if (new URL(extTab.url).origin !== new URL(tab.url).origin) {
-        if (!settings.tabExclusive && !allTabsModeIsOn)
-          return removeExtensionTab(extTab, true);
-      }
-      return updateExtensionTab(tab);
-    }
-  }
-
-  /*
-  // Redirect Same Tab
-  if (!extTab || !tab.url) return;
-  if (new URL(extTab.url).origin !== new URL(tab.url).origin) {
-    const url = new URL(tab.url);
-    if (new URL(extTab.url).hostname !== url.origin) {
-      if (settings.preventSameTabRedirects) {
-        return chrome.tabs.update(tabId, { url: extTab.url }).catch(() => null);
-      }
-    } else {
-      if (!settings.tabExclusive && !allTabsModeIsOn) {
-        return removeExtensionTab(extTab, true);
-      }
-    }
-  }
-  */
-  if (extTab) updateExtensionTab(tab);
+  await handleTabUpdate(tab);
 });
+
 
 chrome.tabs.onActivated.addListener(async (activeInfo) => {
   const tab = await chrome.tabs.get(activeInfo.tabId).catch(() => null);
