@@ -6,6 +6,8 @@
 
 ### Refactor onCreated and onUpdated: Simplify with early returns, helper functions, and replace setInterval with chrome.webNavigation.onCommitted.
 
+### Decouple All Tabs Mode: Separate All Tabs Mode logic from tab activation.
+
 ###### Updated by ZeroHackz
 ---------------
 # Redirect Blocker

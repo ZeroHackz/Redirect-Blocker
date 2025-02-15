@@ -29,9 +29,9 @@ const initialSettings = {
   tabExclusive: false,
   preventSameTabRedirects: false,
   savedURLs: ["https://soap2day.day/", "https://vipleague.im/"],
-  allowedURLs: ["https://youtube.com/@Tyson3101"],
-  shortCutToggleSingleKeys: ["alt", "shift", "s"],
-  shortCutToggleAllKeys: ["alt", "shift", "a"],
+  allowedURLs: ["https://github.com/ZeroHackz/Redirect-Blocker"],
+  shortCutToggleSingleKeys: ["alt", "shift", "k"],
+  shortCutToggleAllKeys: ["alt", "shift", "l"],
   onStartup: false,
 };
 
@@ -53,6 +53,26 @@ async function checkRedirect(tab: chrome.tabs.Tab, extTab: Tab | null) {// onCre
   }
 };
 
+async function addExtensionTab(tab: chrome.tabs.Tab, instantSave: boolean = false) {
+  if (!tab) return;
+  if (extensionTabs.find(et => et.id === tab.id)) return; //Prevent adding twice.
+
+  const updatedTabData = {
+      id: tab.id,
+      url: tab.url,
+      active: tab.active,
+      windowId: tab.windowId,
+      windowActive: tab.windowId === (await getCurrentWindowId()),
+      savedURL: isURLMatch(settings.savedURLs, tab.url),
+  };
+
+  extensionTabs.push(updatedTabData);
+  sendToggledStateToContentScript(tab.id, true);
+
+  if (instantSave) saveExtTabs();
+  else debouncedSaveExtTabs();
+}
+
 async function handleTabUpdate(tab: chrome.tabs.Tab) {// onUpdated Listening events
   const tabId = tab.id;
   const url = tab.url;
@@ -61,7 +81,7 @@ async function handleTabUpdate(tab: chrome.tabs.Tab) {// onUpdated Listening eve
   // Check if saved URL. If so, add to extTabs
   if (isURLMatch(settings.savedURLs, url)) {
       if (!extTab) {
-          await updateExtensionTab(tab, true);
+          await addExtensionTab(tab, true);
           return;
       }
   }
@@ -113,15 +133,21 @@ chrome.webNavigation.onCommitted.addListener(async (details) => {//on created re
   const tab = await chrome.tabs.get(tabId).catch(() => null);
   if (!tab) return;
 
-  const extTab = extensionTabs.find(
-      (t) => t.active && t.windowId === tab.windowId
-  );
-  if (!extTab && !allTabsModeIsOn) return;
+  const disabledTab = disabledTabs.find((t) => t.id === tabId);
+  if (disabledTab) {
+      try {
+          if (new URL(disabledTab.url).hostname === new URL(tab.url).hostname) return;
+          else removeDisabledTab(disabledTab);
+      } catch (error) {
+          console.error("Error comparing hostnames for disabled tab", error);
+          removeDisabledTab(disabledTab); // Remove on error to avoid getting stuck
+          return;
+      }
+  }
 
-
-  if (extTab && extTab.windowId !== tab.windowId) return;
-
-  await checkRedirect(tab, extTab);
+  if (allTabsModeIsOn || extensionTabs.find(et => et.id === tabId)) {
+      await handleTabUpdate(tab);
+  }
 });
 
 chrome.webNavigation.onCommitted.addListener(async (details) => {
@@ -149,19 +175,12 @@ chrome.webNavigation.onCommitted.addListener(async (details) => {
 chrome.tabs.onActivated.addListener(async (activeInfo) => {
   const tab = await chrome.tabs.get(activeInfo.tabId).catch(() => null);
   if (!tab) return;
+
+  // Only update active states, don't add/remove tabs
   for (let extTab of extensionTabs) {
-    // If ext tab is this tab, then it is active so update
-    if (extTab.id === tab.id) {
-      updateExtensionTab(tab);
-      continue;
-    }
-    // If tab is active and same window, but not active tab, update.
-    if (extTab.active && extTab.windowId === tab.windowId) {
-      const extChromeTab = await chrome.tabs.get(extTab.id).catch(() => null);
-      if (!extChromeTab) return removeExtensionTab(extTab);
-      updateExtensionTab(extChromeTab);
-      continue;
-    }
+      extTab.active = extTab.id === tab.id;
+      extTab.windowActive = extTab.windowId === tab.windowId && tab.windowId === (await getCurrentWindowId());
+      await updateExtensionTab(extTab); // Update the stored tab info
   }
 });
 
@@ -228,27 +247,32 @@ chrome.storage.onChanged.addListener((changes) => {
 
 chrome.runtime.onMessage.addListener(async (message) => {
   if (message.toggleSingle === true) {
-    const tab = (
-      await chrome.tabs.query({ active: true, currentWindow: true })
-    )?.[0];
-    if (!tab) return;
-    const extTab = extensionTabs.find((t) => t.id === tab.id);
-    if (extTab) {
-      removeExtensionTab(extTab, true);
-    } else {
-      updateExtensionTab(tab, true);
-    }
+      const tab = (
+          await chrome.tabs.query({ active: true, currentWindow: true })
+      )?.[0];
+      if (!tab) return;
+      const extTab = extensionTabs.find((t) => t.id === tab.id);
+      if (extTab) {
+          removeExtensionTab(extTab, true);
+      } else {
+          await addExtensionTab(tab, true);
+      }
   } else if (message.toggleAll === true) {
-    if (allTabsModeIsOn) {
-      extensionTabs.splice(0, extensionTabs.length);
-      allTabsModeIsOn = false;
-    } else {
-      const tabs = await chrome.tabs.query({}).catch(() => []);
-      extensionTabs.splice(0, extensionTabs.length, ...tabs);
-      allTabsModeIsOn = true;
-    }
-    saveExtTabs();
-    chrome.storage.local.set({ allTabsModeIsOn: allTabsModeIsOn });
+      if (allTabsModeIsOn) {
+          extensionTabs.splice(0, extensionTabs.length);
+          allTabsModeIsOn = false;
+      } else {
+          const tabs = await chrome.tabs.query({}).catch(() => []);
+          extensionTabs.splice(0, extensionTabs.length, ...tabs);
+          allTabsModeIsOn = true;
+      }
+      saveExtTabs();
+      chrome.storage.local.set({ allTabsModeIsOn: allTabsModeIsOn });
+  } else if (message.action === "addTab") {
+      await addExtensionTab(message.tab, true);
+  } else if (message.action === "removeTab") {
+      const extTab = extensionTabs.find((t) => t.id === message.tab.id);
+      if (extTab) removeExtensionTab(extTab, true);
   }
 });
 
@@ -386,7 +410,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 });
 
 // Utility Functions
-// Chat GPT
 function isURLMatch(urls: string[], url: string): boolean {
   if (!url) return false;
 
@@ -405,9 +428,7 @@ function isURLMatch(urls: string[], url: string): boolean {
       return false; // Handle invalid URLs gracefully
   }
 }
-// END Chat GPT
 
-// Github Co-Pilot
 function debounce(func: Function, wait: number) {
   let timeout: ReturnType<typeof setTimeout>;
   return function executedFunction(...args: any[]) {
@@ -419,7 +440,6 @@ function debounce(func: Function, wait: number) {
     timeout = setTimeout(later, wait);
   };
 }
-// END Github Co-Pilot
 
 async function getCurrentWindowId() {
   const window = await chrome.windows.getCurrent();
@@ -428,15 +448,7 @@ async function getCurrentWindowId() {
 
 // Initialization
 (function initializeExtension() {
-  chrome.storage.sync.get("settings", (res) => {
-    let savedSettings = res?.settings as typeof initialSettings;
-    if (!savedSettings) {
-      savedSettings = initialSettings;
-      chrome.storage.sync.set({ settings: initialSettings });
-    }
-    allowedURLs = [...savedSettings.allowedURLs, ...builtInURLs];
-    settings = savedSettings;
-  });
+  
   chrome.storage.local.get(["extensionTabs", "disabledTabs"], async (res) => {
     // Extension Tabs
     if (!res?.extensionTabs) {

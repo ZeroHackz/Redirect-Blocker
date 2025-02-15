@@ -61,6 +61,25 @@ let extensionModePopUp = "single";
 let allTabsModeIsOn_POPUP = false;
 let currentTabIsOn_POPUP = false;
 
+/** ASYNC FUNCTIONS */
+
+async function addExtensionTabToBackground(tab: chrome.tabs.Tab) {
+  await chrome.runtime.sendMessage({ action: "addTab", tab: tab });
+}
+
+async function removeExtensionTabFromBackground(tab: chrome.tabs.Tab) {
+  await chrome.runtime.sendMessage({ action: "removeTab", tab: tab });
+}
+
+async function setAllTabsMode(allTabsMode: boolean) {
+  chrome.storage.local.set({ allTabsModeIsOn: allTabsMode });
+  allTabsModeIsOn_POPUP = allTabsMode;
+  currentTabIsOn_POPUP = allTabsMode;
+  changeToggleButton(allTabsMode);
+}
+
+
+
 // URL PAGE
 changeToAllowedURL.onclick = () => {
   document.querySelector("#savedURLsPage").classList.add("remove");
@@ -98,49 +117,47 @@ chrome.storage.local.get("allTabsModeIsOn", ({ allTabsModeIsOn }) => {
 
 toggleBtn.onclick = async () => {
   const activeTab = (
-    await chrome.tabs
-      .query({ active: true, currentWindow: true })
-      .catch(() => null)
+      await chrome.tabs
+          .query({ active: true, currentWindow: true })
+          .catch(() => null)
   )?.[0];
   if (!activeTab) return;
-  chrome.storage.local.get(["extensionTabs"], async ({ extensionTabs }) => {
-    if (!extensionTabs) extensionTabs = [];
 
-    if (extensionModePopUp === "single") {
-      const extTab = extensionTabs.find((tab) => tab.id === activeTab.id);
-      if (extTab) {
-        extensionTabs = extensionTabs.filter((tab) => tab.id !== activeTab.id);
-        currentTabIsOn_POPUP = false;
-        if (extTab.savedURL) {
-          enableOrDisableTab(activeTab, true);
-        }
+  chrome.storage.local.get(["extensionTabs", "allTabsModeIsOn"], async ({ extensionTabs, allTabsModeIsOn }) => {
+      if (!extensionTabs) extensionTabs = [];
+
+      if (extensionModePopUp === "single") {
+          const extTab = extensionTabs.find((tab) => tab.id === activeTab.id);
+          if (extTab) {
+              //remove the tab.
+              extensionTabs = extensionTabs.filter((tab) => tab.id !== activeTab.id);
+              removeExtensionTabFromBackground(activeTab);
+              currentTabIsOn_POPUP = false;
+              if (extTab.savedURL) {
+                  enableOrDisableTab(activeTab, true);
+              }
+          } else {
+              //add the tab
+              addExtensionTabToBackground(activeTab);
+              const savedURL = isURLMatchPOPUP(
+                  savedURLsInput.value.split("\n"),
+                  activeTab.url
+              );
+              extensionTabs.push({ ...activeTab, savedURL });
+              currentTabIsOn_POPUP = true;
+              enableOrDisableTab(activeTab);
+
+          }
+          chrome.storage.local.set({ extensionTabs });
+          changeToggleButton(currentTabIsOn_POPUP);
       } else {
-        const savedURL = isURLMatchPOPUP(
-          savedURLsInput.value.split("\n"),
-          activeTab.url
-        );
-        extensionTabs.push({ ...activeTab, savedURL });
-        currentTabIsOn_POPUP = true;
-        enableOrDisableTab(activeTab);
+          if (allTabsModeIsOn_POPUP) {
+              allTabsModeIsOn = false;
+          } else {
+              allTabsModeIsOn = true;
+          }
+          setAllTabsMode(allTabsModeIsOn);
       }
-      chrome.storage.local.set({ extensionTabs });
-      changeToggleButton(currentTabIsOn_POPUP);
-    } else {
-      if (allTabsModeIsOn_POPUP) {
-        extensionTabs = [];
-        allTabsModeIsOn_POPUP = false;
-        currentTabIsOn_POPUP = false;
-        changeToggleButton(false);
-        chrome.storage.local.set({ extensionTabs, allTabsModeIsOn: false });
-      } else {
-        const tabs = await chrome.tabs.query({}).catch(() => []);
-        extensionTabs = tabs;
-        allTabsModeIsOn_POPUP = true;
-        currentTabIsOn_POPUP = true;
-        changeToggleButton(true);
-        chrome.storage.local.set({ extensionTabs, allTabsModeIsOn: true });
-      }
-    }
   });
 };
 
