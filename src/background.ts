@@ -16,11 +16,11 @@ let keepAlive: ReturnType<typeof setInterval>;
 const builtInURLs = [
   "https://google.com/",
   "chrome://",
+  "edge://",
   "chrome-extension://egmgebeelgaakhaoodlmnimbfemfgdah",
+  "edge-extension://egmgebeelgaakhaoodlmnimbfemfgdah",
   "https://developer.mozilla.org/en-US/docs/Web/API/UI_Events/Keyboard_event_key_values",
-  "https://github.com/Tyson3101/",
-  "https://chrome.google.com/webstore/detail/redirect-blocker/egmgebeelgaakhaoodlmnimbfemfgdah",
-  "https://tyson3101.com",
+  "https://chrome.google.com/webstore/detail/redirect-blocker/egmgebeelgaakhaoodlmnimbfemfgdah""
 ];
 
 let allowedURLs = [...builtInURLs];
