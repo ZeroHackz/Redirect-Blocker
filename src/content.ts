@@ -4,33 +4,9 @@ let shortCutToggleAllKeys: string[] = ["alt", "shift", "a"];
 
 let pressedKeys: string[] = [];
 
-chrome.storage.sync.get("settings", (result) => {
-  const settings = result.settings;
-  if (!settings) return;
-
-  if (!settings.shortCutToggleSingleKeys || !settings.shortCutToggleAllKeys) {
-    if (!settings.shortCutToggleSingleKeys)
-      settings.shortCutToggleSingleKeys = shortCutToggleSingleKeys;
-    if (!settings.shortCutToggleAllKeys)
-      settings.shortCutToggleAllKeys = shortCutToggleAllKeys;
-
-    chrome.storage.sync.set({ settings });
-  }
-
-  shortCutToggleSingleKeys = settings.shortCutToggleSingleKeys;
-  shortCutToggleAllKeys = settings.shortCutToggleAllKeys;
-});
-
-chrome.storage.onChanged.addListener((changes) => {
-  if (changes.settings) {
-    const settings = changes.settings.newValue;
-    if (!settings) return;
-    shortCutToggleSingleKeys = settings.shortCutToggleSingleKeys;
-    shortCutToggleAllKeys = settings.shortCutToggleAllKeys;
-  }
-});
-
-shortCutListener();
+/**
+ * FUNCTIONS
+ */
 
 function shortCutListener() {
   let pressedKeys = [];
@@ -79,35 +55,10 @@ function shortCutListener() {
   });
 }
 
-// Same Tab Redirects
-// Variables
-let tabId: number = null;
-let isTabToggledOn = false;
-let isSameTabRedirectsPrevented = false;
-let combinedURLs: string[] = [];
-
-// Get the current tab ID
-chrome.runtime.sendMessage({ action: "getTabId" }, (response) => {
-  tabId = response.tabId;
-  beginPreventionOfSameTabRedirects();
-});
-
-// Handle messages from other parts of the extension
-chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
-  if (request.action === "toggleTab") {
-    isTabToggledOn = !!request.isToggledOn;
-    if (isTabToggledOn) {
-      beginPreventionOfSameTabRedirects();
-    } else {
-      endPreventionOfSameTabRedirects();
-    }
-  }
-});
-
 // Prevent same tab redirects
 function preventSameTabRedirect(event: Event) {
   const aTag = event.target as HTMLAnchorElement;
-  if (!isTabToggledOn || !isSameTabRedirectsPrevented) return;
+  if (!isTabToggledOn || !isSameTabRedirectsPrevented || !isTabEnabled) return; //NEW: check isTabEnabled
 
   if (aTag && aTag.href) {
     if (!isURLMatchSameTab(combinedURLs, aTag.href)) {
@@ -118,7 +69,7 @@ function preventSameTabRedirect(event: Event) {
 
 // Start preventing same tab redirects
 function beginPreventionOfSameTabRedirects() {
-  if (!isTabToggledOn || !isSameTabRedirectsPrevented) return;
+  if (!isTabToggledOn || !isSameTabRedirectsPrevented || !isTabEnabled) return; //NEW: check isTabEnabled
 
   // Set up a MutationObserver to watch for new <a> tags
   const observer = new MutationObserver((mutationsList) => {
@@ -150,23 +101,91 @@ function endPreventionOfSameTabRedirects() {
 
 // Check if the URL matches the allowed URLs for same tab redirects
 function isURLMatchSameTab(urls: string[], url: string): boolean {
-
   if (!url) return false;
   try {
-      const targetHostname = new URL(url).hostname;
+    const targetHostname = new URL(url).hostname;
 
-      for (const currentUrl of urls) {
-          const allowedHostname = new URL(currentUrl).hostname;
-          if (targetHostname === allowedHostname) {
-              return true;
-          }
+    for (const currentUrl of urls) {
+      const allowedHostname = new URL(currentUrl).hostname;
+      if (targetHostname === allowedHostname) {
+        return true;
       }
-      return false;
+    }
+    return false;
   } catch (error) {
-      console.error("Invalid URL:", url, error); // Log invalid URLs
-      return false; // Handle invalid URLs gracefully
+    console.error("Invalid URL:", url, error); // Log invalid URLs
+    return false; // Handle invalid URLs gracefully
   }
 }
+
+function getTabEnabledState() {
+  //NEW
+  chrome.runtime.sendMessage({ action: "getTabEnabledState" }, (response) => {
+    isTabEnabled = response.tabEnabledState;
+    if (!isTabEnabled) {
+      endPreventionOfSameTabRedirects();
+    } else {
+      beginPreventionOfSameTabRedirects();
+    }
+  });
+}
+
+// Storage
+
+chrome.storage.sync.get("settings", (result) => {
+  const settings = result.settings;
+  if (!settings) return;
+
+  if (!settings.shortCutToggleSingleKeys || !settings.shortCutToggleAllKeys) {
+    if (!settings.shortCutToggleSingleKeys)
+      settings.shortCutToggleSingleKeys = shortCutToggleSingleKeys;
+    if (!settings.shortCutToggleAllKeys)
+      settings.shortCutToggleAllKeys = shortCutToggleAllKeys;
+
+    chrome.storage.sync.set({ settings });
+  }
+
+  shortCutToggleSingleKeys = settings.shortCutToggleSingleKeys;
+  shortCutToggleAllKeys = settings.shortCutToggleAllKeys;
+});
+
+chrome.storage.onChanged.addListener((changes) => {
+  if (changes.settings) {
+    const settings = changes.settings.newValue;
+    if (!settings) return;
+    shortCutToggleSingleKeys = settings.shortCutToggleSingleKeys;
+    shortCutToggleAllKeys = settings.shortCutToggleAllKeys;
+  }
+});
+
+shortCutListener();
+
+// Same Tab Redirects
+// Variables
+let tabId: number = null;
+let isTabToggledOn = false;
+let isSameTabRedirectsPrevented = false;
+let combinedURLs: string[] = [];
+let isTabEnabled = true; //NEW
+
+// Get the current tab ID
+chrome.runtime.sendMessage({ action: "getTabId" }, (response) => {
+  tabId = response.tabId;
+  beginPreventionOfSameTabRedirects();
+  getTabEnabledState(); //NEW
+});
+
+// Handle messages from other parts of the extension
+chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+  if (request.action === "toggleTab") {
+    isTabToggledOn = !!request.isToggledOn;
+    if (isTabToggledOn) {
+      beginPreventionOfSameTabRedirects();
+    } else {
+      endPreventionOfSameTabRedirects();
+    }
+  }
+});
 
 // Initialize settings and add listeners
 chrome.storage.local.get("extensionTabs", (result) => {

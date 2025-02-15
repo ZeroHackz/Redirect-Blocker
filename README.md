@@ -8,6 +8,8 @@
 
 ### Decouple All Tabs Mode: Separate All Tabs Mode logic from tab activation.
 
+### Clarify disabledTabs: Review and clarify the disabledTabs function. Remove disabledTabs.splice(0, disabledTabs.length, ...disabledTabs);
+
 ###### Updated by ZeroHackz
 ---------------
 # Redirect Blocker

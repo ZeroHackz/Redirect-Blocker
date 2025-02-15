@@ -60,6 +60,7 @@ const placeholderSettings = {
 let extensionModePopUp = "single";
 let allTabsModeIsOn_POPUP = false;
 let currentTabIsOn_POPUP = false;
+let isTabEnabled_POPUP = true;
 
 /** ASYNC FUNCTIONS */
 
@@ -70,6 +71,13 @@ async function addExtensionTabToBackground(tab: chrome.tabs.Tab) {
 async function removeExtensionTabFromBackground(tab: chrome.tabs.Tab) {
   await chrome.runtime.sendMessage({ action: "removeTab", tab: tab });
 }
+async function toggleTabEnabled(tabId: number) {
+  // NEW: Function to toggle tab enabled state
+  await chrome.runtime.sendMessage({
+    action: "toggleTabEnabled",
+    tabId: tabId,
+  });
+}
 
 async function setAllTabsMode(allTabsMode: boolean) {
   chrome.storage.local.set({ allTabsModeIsOn: allTabsMode });
@@ -77,8 +85,6 @@ async function setAllTabsMode(allTabsMode: boolean) {
   currentTabIsOn_POPUP = allTabsMode;
   changeToggleButton(allTabsMode);
 }
-
-
 
 // URL PAGE
 changeToAllowedURL.onclick = () => {
@@ -102,10 +108,12 @@ chrome.storage.local.get("extensionTabs", async ({ extensionTabs }) => {
   if (!activeTab) return;
   const extTab = extensionTabs.find((tab) => tab.id === activeTab.id);
   if (extTab) {
-    changeToggleButton(true);
+    changeToggleButton(extTab.isTabEnabled); // NEW: Use extTab.isTabEnabled
     currentTabIsOn_POPUP = true;
+    isTabEnabled_POPUP = extTab.isTabEnabled; //NEW
   } else {
     changeToggleButton(false);
+    isTabEnabled_POPUP = true;
   }
 });
 
@@ -117,48 +125,46 @@ chrome.storage.local.get("allTabsModeIsOn", ({ allTabsModeIsOn }) => {
 
 toggleBtn.onclick = async () => {
   const activeTab = (
-      await chrome.tabs
-          .query({ active: true, currentWindow: true })
-          .catch(() => null)
+    await chrome.tabs
+      .query({ active: true, currentWindow: true })
+      .catch(() => null)
   )?.[0];
   if (!activeTab) return;
 
-  chrome.storage.local.get(["extensionTabs", "allTabsModeIsOn"], async ({ extensionTabs, allTabsModeIsOn }) => {
+  chrome.storage.local.get(
+    ["extensionTabs", "allTabsModeIsOn"],
+    async ({ extensionTabs, allTabsModeIsOn }) => {
       if (!extensionTabs) extensionTabs = [];
 
       if (extensionModePopUp === "single") {
-          const extTab = extensionTabs.find((tab) => tab.id === activeTab.id);
-          if (extTab) {
-              //remove the tab.
-              extensionTabs = extensionTabs.filter((tab) => tab.id !== activeTab.id);
-              removeExtensionTabFromBackground(activeTab);
-              currentTabIsOn_POPUP = false;
-              if (extTab.savedURL) {
-                  enableOrDisableTab(activeTab, true);
-              }
-          } else {
-              //add the tab
-              addExtensionTabToBackground(activeTab);
-              const savedURL = isURLMatchPOPUP(
-                  savedURLsInput.value.split("\n"),
-                  activeTab.url
-              );
-              extensionTabs.push({ ...activeTab, savedURL });
-              currentTabIsOn_POPUP = true;
-              enableOrDisableTab(activeTab);
-
-          }
-          chrome.storage.local.set({ extensionTabs });
-          changeToggleButton(currentTabIsOn_POPUP);
+        const extTab = extensionTabs.find((tab) => tab.id === activeTab.id);
+        if (extTab) {
+          await toggleTabEnabled(activeTab.id); //NEW
+          isTabEnabled_POPUP = !isTabEnabled_POPUP; //NEW
+          changeToggleButton(isTabEnabled_POPUP); //NEW
+        } else {
+          //add the tab
+          addExtensionTabToBackground(activeTab);
+          const savedURL = isURLMatchPOPUP(
+            savedURLsInput.value.split("\n"),
+            activeTab.url
+          );
+          extensionTabs.push({ ...activeTab, savedURL, isTabEnabled: true }); //NEW
+          currentTabIsOn_POPUP = true;
+          isTabEnabled_POPUP = true;
+          changeToggleButton(true);
+        }
+        chrome.storage.local.set({ extensionTabs });
       } else {
-          if (allTabsModeIsOn_POPUP) {
-              allTabsModeIsOn = false;
-          } else {
-              allTabsModeIsOn = true;
-          }
-          setAllTabsMode(allTabsModeIsOn);
+        if (allTabsModeIsOn_POPUP) {
+          allTabsModeIsOn = false;
+        } else {
+          allTabsModeIsOn = true;
+        }
+        setAllTabsMode(allTabsModeIsOn);
       }
-  });
+    }
+  );
 };
 
 currentTabExtMode.onclick = () => {
@@ -185,7 +191,7 @@ function changeExtensionMode(result: "single" | "all") {
     currentTabExtMode.classList.add("selected");
 
     if (currentTabIsOn_POPUP) {
-      changeToggleButton(true);
+      changeToggleButton(isTabEnabled_POPUP); //NEW
     } else {
       changeToggleButton(false);
     }
@@ -365,20 +371,6 @@ pageList.onclick = (e) => {
   }
 };
 
-function enableOrDisableTab(tab: chrome.tabs.Tab, disable = false) {
-  chrome.storage.local.get("disabledTabs", ({ disabledTabs }) => {
-    if (!disabledTabs) disabledTabs = [];
-    const disabledTab = disabledTabs.find((t) => t.id === tab.id);
-    if (!disable && disabledTab) {
-      disabledTabs = disabledTabs.filter((t) => t.id !== tab.id);
-    } else {
-      disabledTabs.push(tab);
-    }
-
-    chrome.storage.local.set({ disabledTabs });
-  });
-}
-
 function changeToggleButton(result: boolean) {
   toggleBtn.innerText = result ? "Turn Off" : "Turn On";
   toggleBtn.classList.remove(result ? "off" : "on");
@@ -399,17 +391,17 @@ function isURLMatchPOPUP(urls: string[], url: string): boolean {
   if (!url) return false;
 
   try {
-      const targetHostname = new URL(url).hostname;
+    const targetHostname = new URL(url).hostname;
 
-      for (const currentUrl of urls) {
-          const allowedHostname = new URL(currentUrl).hostname;
-          if (targetHostname === allowedHostname) {
-              return true;
-          }
+    for (const currentUrl of urls) {
+      const allowedHostname = new URL(currentUrl).hostname;
+      if (targetHostname === allowedHostname) {
+        return true;
       }
-      return false;
+    }
+    return false;
   } catch (error) {
-      console.error("Invalid URL:", url, error); // Log invalid URLs
-      return false; // Handle invalid URLs gracefully
+    console.error("Invalid URL:", url, error); // Log invalid URLs
+    return false; // Handle invalid URLs gracefully
   }
 }
