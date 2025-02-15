@@ -388,29 +388,23 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
 // Utility Functions
 // Chat GPT
-function isURLMatch(urls: string[], url: string) {
+function isURLMatch(urls: string[], url: string): boolean {
   if (!url) return false;
-  const normalizeUrl = (url: string) =>
-    url
-      .replace(/^https?:\/\/(www\.)?(ww\d+\.)?/, "https://")
-      .replace(/\/([^?]+).*$/, "/$1")
-      .replace(/\/$/, "")
-      .toLowerCase();
 
-  const normalizedUrl = normalizeUrl(url);
+  try {
+      const targetHostname = new URL(url).hostname;
 
-  for (const currentUrl of urls) {
-    const normalizedCurrentUrl = normalizeUrl(currentUrl);
-
-    if (
-      normalizedUrl === normalizedCurrentUrl ||
-      normalizedUrl.startsWith(normalizedCurrentUrl + "/")
-    ) {
-      return true; // Match found, return true
-    }
+      for (const currentUrl of urls) {
+          const allowedHostname = new URL(currentUrl).hostname;
+          if (targetHostname === allowedHostname) {
+              return true;
+          }
+      }
+      return false;
+  } catch (error) {
+      console.error("Invalid URL:", url, error); // Log invalid URLs
+      return false; // Handle invalid URLs gracefully
   }
-
-  return false; // No match found, return false
 }
 // END Chat GPT
 

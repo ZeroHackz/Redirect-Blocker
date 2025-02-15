@@ -1,3 +1,11 @@
+# Critical Improvements
+
+## Summary of Changes
+
+### Robust URL matching: Implement hostname matching in isURLMatch and isURLMatchPOPUP in background.ts, content.ts, and script.ts.
+
+###### Updated by ZeroHackz
+---------------
 # Redirect Blocker
 
 <img src="./extension/img/Icon128.png" />
