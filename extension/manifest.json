@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Redirect Blocker",
-  "version": "3.4.0",
+  "version": "4.0.0",
   "background": {
     "service_worker": "./dist/background.js"
   },
@@ -11,16 +11,5 @@
     "32": "./img/Icon32.png",
     "128": "./img/Icon128.png"
   },
-  "action": {
-    "default_icon": "./img/popupIcon128.png",
-    "default_popup": "/dist/popup/popup.html",
-    "default_title": "Redirect Blocker"
-  },
-  "content_scripts": [
-    {
-      "matches": ["<all_urls>"],
-      "js": ["./dist/content.js"]
-    }
-  ],
   "permissions": ["tabs", "storage"]
 }
