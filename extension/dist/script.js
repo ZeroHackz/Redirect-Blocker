@@ -21,7 +21,7 @@ const placeholderSettings = {
     tabExclusive: false,
     preventSameTabRedirects: false,
     savedURLs: ["https://soap2day.day/", "https://vipleague.im/"],
-    allowedURLs: ["https://youtube.com/@Tyson3101"],
+    allowedURLs: ["https://github.com/@ZeroHackz"],
     shortCutToggleSingleKeys: ["alt", "shift", "s"],
     shortCutToggleAllKeys: ["alt", "shift", "a"],
     onStartup: false,

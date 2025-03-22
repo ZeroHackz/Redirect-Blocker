@@ -38,4 +38,4 @@
 
 <img src="./images/ShowcaseImg.png" width="500" height="300"/>
 
-###### By Tyson3101
+###### By ZeroHackz and ZeroHackz
